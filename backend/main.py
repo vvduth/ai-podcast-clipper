@@ -38,7 +38,7 @@ image = (modal.Image.from_registry(
                    "wget -O /usr/share/fonts/truetype/custom/Anton-Regular.ttf https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf",
                    "fc-cache -f -v"])
     # add local code
-    .add_local_dir("asd", "/asd", copy=True))
+    .add_local_dir("LR-ASD", "/asd", copy=True))
 
 app = modal.App("ai-podcast-clipper", image=image)
 
@@ -65,7 +65,7 @@ def create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path,
 
     for tidx, track in enumerate(tracks):
         score_array = scores[tidx]
-        for fidx, frame in enumerate(track["track"]["frame"].toList()):
+        for fidx, frame in enumerate(track["track"]["frame"].tolist()):
             slice_start = max(fidx -30, 0)
             slice_end = min(fidx +30,len(score_array))
             score_slice = score_array[slice_start:slice_end]
