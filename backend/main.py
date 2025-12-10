@@ -24,7 +24,7 @@ import whisperx
 
 
 
-class ProcessVideoRequest():
+class ProcessVideoRequest(BaseModel):
     s3_key: str
 
 # build a custom Docker image with CUDA and Python 3.13
@@ -113,7 +113,31 @@ def create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path,
             blurred_background = cv2.GaussianBlur(blurred_background, (121, 121), 0)
             crop_x = (bg_width - target_width) // 2
             crop_y = (bg_height - target_height) // 2
-        
+            blurred_background = blurred_background[crop_y:crop_y + target_height,
+                                                    crop_x:crop_x + target_width]
+
+            center_y = (target_height - resize_height) // 2
+            blurred_background[center_y:center_y + resize_height, :] = resize_image
+
+            vout.write(blurred_background)
+        elif mode == "crop":
+            scale = target_height / img.shape[0]
+            resized_image = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            frame_width = resized_image.shape[1]
+
+            center_x = int(max_score_face["x"] * scale if max_score_face else frame_width // 2)
+            top_x = max(min(center_x - target_width // 2,
+                            frame_width - target_width), 0)
+            image_cropped = resized_image[0:target_height, top_x:top_x + target_width]
+            vout.write(image_cropped)
+    if vout:
+        vout.release()
+
+    # combine with audio
+    ffmpeg_command = (f"ffmpeg -y -i {temp_video_path} -i {audio_path} "
+                      f"-c:v h264 -preset fast -crf 23 -c:a aac -b:a 128k "
+                      f"{output_path}")
+    subprocess.run(ffmpeg_command, shell=True, check=True, text=True)
 
 def process_clip(base_dir: str, original_video_path: str,
                  s3_key: str, start_time: float,
@@ -147,7 +171,6 @@ def process_clip(base_dir: str, original_video_path: str,
                    f"{clip_segment_path}")
     subprocess.run(cut_command, shell=True, check=True,
                    capture_output=True, text=True)
-    subprocess.run(cut_command, shell=True, check=True, capture_output=True, text=True)
 
     # extract audio for pyavi
     extract_audio_cmd = f"ffmpeg -i {clip_segment_path} -vn -acodec pcm_s16le -ar 16000 -ac 1 {audio_path}"
@@ -176,6 +199,11 @@ def process_clip(base_dir: str, original_video_path: str,
     cvv_end_time = time.time()
     print(f"Vertical video creation time: {cvv_end_time - cvv_start_time:.2f} seconds")
 
+    # upload to S3
+    s3_client = boto3.client("s3")
+    s3_client.upload_file(vertical_mp4_path, "ai-podcast-clipper-dukem", output_s3_key)
+    print(f"Uploaded clip to S3: {output_s3_key}")
+
 # Define the Modal class with GPU and FastAPI endpoint
 @app.cls(gpu="H100", timeout=900, retries=0, scaledown_window=20,
 secrets=[modal.Secret.from_name("ai-podcast-clipper")]
@@ -193,7 +221,7 @@ class AiPodcastClipper:
         print("Transcription model and alignment model loaded...")
 
         print("Creating GenAI client...")
-        self.gemini_client = genai.Client(api_key=os.environ("GENAI_API_KEY"))
+        self.gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         print("GenAI client initialized.")
 
     def transcribe_video(self, base_dir:str, video_path: str) -> str:
@@ -232,7 +260,7 @@ class AiPodcastClipper:
         return json.dumps(segments)
 
     def identify_moments(self, transcript: dict):
-        response = self.gemini_client.models.generate_content(model="gemini-2.5-flash-preview-04-17", contents="""
+        response = self.gemini_client.models.generate_content(model="gemini-2.5-flash-lite", contents="""
     This is a podcast video transcript consisting of word, along with each words's start and end time. I am looking to create clips between a minimum of 30 and maximum of 60 seconds long. The clip should never exceed 60 seconds.
 
     Your task is to find and extract stories, or question and their corresponding answers from the transcript.
@@ -291,10 +319,10 @@ class AiPodcastClipper:
         print(clip_moments)
 
         # 3. loop through clip moment and extract clips
-        for index, moment in enumerate(clip_moments[:3]):
+        for index, moment in enumerate(clip_moments[:1]):
             if "start" in moment and "end" in moment:
                 print("processing moment:" + str(index) + " start:" + str(moment["start"]) + " end:" + str(moment["end"]))
-                process_clip[base_dir, video_path, s3_key, moment["start"], moment["end"], index, transcript_segments]
+                process_clip(base_dir, video_path, s3_key, moment["start"], moment["end"], index, transcript_segments)
         if base_dir.exists():
             print("Cleaning up temporary files " + str(base_dir))
             shutil.rmtree(base_dir,ignore_errors=True)
