@@ -76,14 +76,9 @@ def create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path,
     temp_video_path = os.path.join(pyavi_path, "video_only.mp4")
 
     vout = None
-    frames_written = 0
-    frames_skipped = 0
-    
     for fidx, fname in tqdm(enumerate(flist), total=len(flist), desc="Creating vertical video"):
         img = cv2.imread(fname)
         if img is None:
-            frames_skipped += 1
-            print(f"Warning: Could not read frame {fidx}: {fname}")
             continue
 
         current_faces = faces[fidx]
@@ -131,18 +126,7 @@ def create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path,
             blurred_background[center_y:center_y +
                                resized_height, :] = resized_image
 
-            # Validate dimensions before writing
-            if blurred_background.shape[0] != target_height or blurred_background.shape[1] != target_width:
-                print(f"Warning: Frame {fidx} dimensions mismatch. Expected ({target_height}, {target_width}), got {blurred_background.shape}")
-                blurred_background = cv2.resize(blurred_background, (target_width, target_height))
-            
-            try:
-                vout.write(blurred_background)
-                frames_written += 1
-            except BrokenPipeError as e:
-                print(f"BrokenPipeError at frame {fidx}: {e}")
-                print(f"Frame shape: {blurred_background.shape}, dtype: {blurred_background.dtype}")
-                raise
+            vout.write(blurred_background)
 
         elif mode == "crop":
             scale = target_height / img.shape[0]
@@ -158,21 +142,8 @@ def create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path,
             image_cropped = resized_image[0:target_height,
                                           top_x:top_x + target_width]
 
-            # Validate dimensions before writing
-            if image_cropped.shape[0] != target_height or image_cropped.shape[1] != target_width:
-                print(f"Warning: Frame {fidx} crop dimensions mismatch. Expected ({target_height}, {target_width}), got {image_cropped.shape}")
-                image_cropped = cv2.resize(image_cropped, (target_width, target_height))
-            
-            try:
-                vout.write(image_cropped)
-                frames_written += 1
-            except BrokenPipeError as e:
-                print(f"BrokenPipeError at frame {fidx}: {e}")
-                print(f"Frame shape: {image_cropped.shape}, dtype: {image_cropped.dtype}")
-                raise
+            vout.write(image_cropped)
 
-    print(f"Video creation complete: {frames_written} frames written, {frames_skipped} frames skipped")
-    
     if vout:
         vout.release()
 
@@ -189,18 +160,15 @@ def process_clip(base_dir: str, original_video_path: str,
     s3_key_dir = os.path.dirname(s3_key)
     output_s3_key = f"{s3_key_dir}/{clip_name}.mp4"
     print(f"Output S3 Key: {output_s3_key}")
+    
     clip_dir = base_dir / clip_name
     clip_dir.mkdir(parents=True, exist_ok=True)
 
-    # segment paths: original clip from start to end
     clip_segment_path = clip_dir / f"{clip_name}_segment.mp4"
-
-    # vertical video path for TikTok/Instagram
-    # create pyavi directory for the accroding to the LR-ASD documentation
     vertical_mp4_path = clip_dir / "pyavi" / "video_out_vertical.mp4"
     subtitle_output_path = clip_dir / "pyavi" / "video_with_subtitles.mp4"
 
-    (clip_dir /"pywork").mkdir(parents=True, exist_ok=True)
+    (clip_dir / "pywork").mkdir(exist_ok=True)
     pyframes_path = clip_dir / "pyframes"
     pyavi_path = clip_dir / "pyavi"
     audio_path = clip_dir / "pyavi" / "audio.wav"
@@ -215,31 +183,40 @@ def process_clip(base_dir: str, original_video_path: str,
                    capture_output=True, text=True)
 
     # extract audio for pyavi
-    extract_audio_cmd = f"ffmpeg -i {clip_segment_path} -vn -acodec pcm_s16le -ar 16000 -ac 1 {audio_path}"
-    subprocess.run(extract_audio_cmd, shell=True, check=True, capture_output=True, text=True)
+    extract_cmd = f"ffmpeg -i {clip_segment_path} -vn -acodec pcm_s16le -ar 16000 -ac 1 {audio_path}"
+    subprocess.run(extract_cmd, shell=True,
+                   check=True, capture_output=True)
 
-    shutil.copy(clip_segment_path, base_dir/ f"{clip_name}.mp4")
+    shutil.copy(clip_segment_path, base_dir / f"{clip_name}.mp4")
+
     columbia_command = (f"python Columbia_test.py --videoName {clip_name} "
                         f"--videoFolder {str(base_dir)} "
                         f"--pretrainModel weight/finetuning_TalkSet.model")
+
     columbia_start_time = time.time()
     subprocess.run(columbia_command, cwd="/asd", shell=True)
     columbia_end_time = time.time()
-    print(f"Columbia model processing time: {columbia_end_time - columbia_start_time:.2f} seconds")
+    print(
+        f"Columbia script completed in {columbia_end_time - columbia_start_time:.2f} seconds")
 
     tracks_path = clip_dir / "pywork" / "tracks.pckl"
     scores_path = clip_dir / "pywork" / "scores.pckl"
     if not tracks_path.exists() or not scores_path.exists():
         raise FileNotFoundError("Tracks or scores not found for clip")
+    
     with open(tracks_path, "rb") as f:
         tracks = pickle.load(f)
+
     with open(scores_path, "rb") as f:
         scores = pickle.load(f)
 
     cvv_start_time = time.time()
-    create_vertical_video(tracks,scores, pyframes_path, pyavi_path, audio_path, vertical_mp4_path)
+    create_vertical_video(
+        tracks, scores, pyframes_path, pyavi_path, audio_path, vertical_mp4_path
+    )
     cvv_end_time = time.time()
-    print(f"Vertical video creation time: {cvv_end_time - cvv_start_time:.2f} seconds")
+    print(
+        f"Clip {clip_index} vertical video creation time: {cvv_end_time - cvv_start_time:.2f} seconds")
 
     # upload to S3
     s3_client = boto3.client("s3")
@@ -247,7 +224,7 @@ def process_clip(base_dir: str, original_video_path: str,
     print(f"Uploaded clip to S3: {output_s3_key}")
 
 # Define the Modal class with GPU and FastAPI endpoint
-@app.cls(gpu="H100", timeout=900, retries=0, scaledown_window=20,
+@app.cls(gpu="L40S", timeout=900, retries=0, scaledown_window=20,
 secrets=[modal.Secret.from_name("ai-podcast-clipper")]
 ,volumes={mount_path: volume})
 class AiPodcastClipper:
@@ -266,12 +243,13 @@ class AiPodcastClipper:
         self.gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         print("GenAI client initialized.")
 
-    def transcribe_video(self, base_dir:str, video_path: str) -> str:
+    def transcribe_video(self, base_dir: str, video_path: str) -> str:
         audio_path = base_dir / "audio.wav"
         extract_cmd = f"ffmpeg -i {video_path} -vn -acodec pcm_s16le -ar 16000 -ac 1 {audio_path}"
-        subprocess.run(extract_cmd, shell=True, check=True, capture_output=True )
+        subprocess.run(extract_cmd, shell=True,
+                       check=True, capture_output=True)
 
-        print("Starting transcription with whisperX...")
+        print("Starting transcription with WhisperX...")
         start_time = time.time()
 
         audio = whisperx.load_audio(str(audio_path))
@@ -283,11 +261,11 @@ class AiPodcastClipper:
             self.metadata,
             audio,
             device="cuda",
-            return_char_alignments=False,
+            return_char_alignments=False
         )
 
         duration = time.time() - start_time
-        print("Transcription completed in {:.2f} seconds".format(duration))
+        print("Transcription and alignment took " + str(duration) + " seconds")
 
         segments = []
 
