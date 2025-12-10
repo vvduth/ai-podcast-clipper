@@ -1,20 +1,26 @@
+import glob
+import json
 import pathlib
+import pickle
+import shutil
+import subprocess
 import time
 import uuid
-
 import boto3
+import cv2
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+import ffmpegcv
 import modal
-from fastapi import HTTPException,status
-from fastapi.openapi.models import HTTPBearer
-from fastapi.params import Depends
-from fastapi.security import HTTPAuthorizationCredentials
+import numpy as np
 from pydantic import BaseModel
-import whisperx
-import subprocess
 import os
-import json
+from google import genai
 
-from torch.cuda import device
+import pysubs2
+from tqdm import tqdm
+import whisperx
+
 
 
 class ProcessVideoRequest():
@@ -43,8 +49,16 @@ volume = modal.Volume.from_name(
 # torch cache is for storing pre-trained models and datasets
 mount_path = "/root/.cache/torch"
 
-auth_scheme = HTTPBearer
+auth_scheme = HTTPBearer()
 
+def process_clip(base_dir: str, original_video_path: str,
+                 s3_key: str, start_time: float,
+                 end_time: float, clip_index: int,
+                 transcript_segments: list):
+    clip_name = f"clip_{clip_index}"
+    s3_key_dir = os.path.dirname(s3_key)
+    output_s3_key = f"{s3_key_dir}/{clip_name}.mp4"
+    print(f"Output S3 Key: {output_s3_key}")
 
 # Define the Modal class with GPU and FastAPI endpoint
 @app.cls(gpu="H100", timeout=900, retries=0, scaledown_window=20,
@@ -61,6 +75,10 @@ class AiPodcastClipper:
         )
 
         print("Transcription model and alignment model loaded...")
+
+        print("Creating GenAI client...")
+        self.gemini_client = genai.Client(api_key=os.environ("GENAI_API_KEY"))
+        print("GenAI client initialized.")
 
     def transcribe_video(self, base_dir:str, video_path: str) -> str:
         audio_path = base_dir / "audio.wav"
@@ -85,7 +103,42 @@ class AiPodcastClipper:
         duration = time.time() - start_time
         print("Transcription completed in {:.2f} seconds".format(duration))
 
-        print(json.dumps(result, indent=2))
+        segments = []
+
+        if "word_segments" in result:
+            for word_segment in result["word_segments"]:
+                segments.append({
+                    "start": word_segment["start"],
+                    "end": word_segment["end"],
+                    "word": word_segment["word"],
+                })
+
+        return json.dumps(segments)
+
+    def identify_moments(self, transcript: dict):
+        response = self.gemini_client.models.generate_content(model="gemini-2.5-flash-preview-04-17", contents="""
+    This is a podcast video transcript consisting of word, along with each words's start and end time. I am looking to create clips between a minimum of 30 and maximum of 60 seconds long. The clip should never exceed 60 seconds.
+
+    Your task is to find and extract stories, or question and their corresponding answers from the transcript.
+    Each clip should begin with the question and conclude with the answer.
+    It is acceptable for the clip to include a few additional sentences before a question if it aids in contextualizing the question.
+
+    Please adhere to the following rules:
+    - Ensure that clips do not overlap with one another.
+    - Start and end timestamps of the clips should align perfectly with the sentence boundaries in the transcript.
+    - Only use the start and end timestamps provided in the input. modifying timestamps is not allowed.
+    - Format the output as a list of JSON objects, each representing a clip with 'start' and 'end' timestamps: [{"start": seconds, "end": seconds}, ...clip2, clip3]. The output should always be readable by the python json.loads function.
+    - Aim to generate longer clips between 40-60 seconds, and ensure to include as much content from the context as viable.
+
+    Avoid including:
+    - Moments of greeting, thanking, or saying goodbye.
+    - Non-question and answer interactions.
+
+    If there are no valid clips to extract, the output should be an empty list [], in JSON format. Also readable by json.loads() in Python.
+
+    The transcript is as follows:\n\n""" + str(transcript))
+        print(f"Identified moments response: ${response.text}")
+        return response.text
     @modal.fastapi_endpoint(method="POST")
     def process_video(self, request: ProcessVideoRequest, token: HTTPAuthorizationCredentials = Depends(auth_scheme)):
         s3_key = request.s3_key
@@ -101,7 +154,35 @@ class AiPodcastClipper:
         s3_client = boto3.client("s3")
         s3_client.download_file("ai-podcast-clipper-dukem", s3_key, str(video_path))
 
-        print(os.listdir(base_dir))
+        # 1. Transcribe video
+        transcript_segments_json = self.transcribe_video(base_dir, video_path)
+        transcript_segments = json.loads(transcript_segments_json)
+
+        # 2. identity key moments using GenAI
+        print("Identifying key moments using GenAI...")
+        identified_moments_raw = self.identify_moments(transcript_segments)
+
+        cleaned_json_string = identified_moments_raw.strip()
+        if cleaned_json_string.startswith("```json"):
+            cleaned_json_string = cleaned_json_string[len("```json"):].strip()
+        if cleaned_json_string.endswith("```"):
+            cleaned_json_string = cleaned_json_string[:-len("```")].strip()
+
+        clip_moments = json.loads(cleaned_json_string)
+        if not clip_moments or not isinstance(clip_moments, list):
+            raise ValueError("Invalid response format from GenAI. Expected a list of clip moments.")
+            clip_moments = []
+        print(clip_moments)
+
+        # 3. loop through clip moment and extract clips
+        for index, moment in enumerate(clip_moments[:3]):
+            if "start" in moment and "end" in moment:
+                print("processing moment:" + str(index) + " start:" + str(moment["start"]) + " end:" + str(moment["end"]))
+                process_clip[base_dir, video_path, s3_key, moment["start"], moment["end"], index, transcript_segments]
+        if base_dir.exists():
+            print("Cleaning up temporary files " + str(base_dir))
+            shutil.rmtree(base_dir,ignore_errors=True)
+
 
 # define a local entrypoint for testing
 @app.local_entrypoint()
