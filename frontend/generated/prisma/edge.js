@@ -164,7 +164,7 @@ const config = {
       "value": "prisma-client-js"
     },
     "output": {
-      "value": "c:\\Users\\ducth\\git_repos\\ai-podcast-clipper\\frontend\\generated\\prisma",
+      "value": "C:\\Users\\ducth\\git_repos\\ai-podcast-clipper\\frontend\\generated\\prisma",
       "fromEnvVar": null
     },
     "config": {
@@ -178,7 +178,7 @@ const config = {
       }
     ],
     "previewFeatures": [],
-    "sourceFilePath": "c:\\Users\\ducth\\git_repos\\ai-podcast-clipper\\frontend\\prisma\\schema.prisma",
+    "sourceFilePath": "C:\\Users\\ducth\\git_repos\\ai-podcast-clipper\\frontend\\prisma\\schema.prisma",
     "isCustomOutput": true
   },
   "relativeEnvPaths": {

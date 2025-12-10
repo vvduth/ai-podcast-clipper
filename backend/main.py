@@ -399,6 +399,11 @@ class AiPodcastClipper:
     The transcript is as follows:\n\n""" + str(transcript))
         print(f"Identified moments response: ${response.text}")
         return response.text
+    @modal.fastapi_endpoint(method="GET")
+    # place holder GET endpoint for health check
+    def health_check(self):
+        return {"status": "ok"}    
+
     @modal.fastapi_endpoint(method="POST")
     def process_video(self, request: ProcessVideoRequest, token: HTTPAuthorizationCredentials = Depends(auth_scheme)):
         s3_key = request.s3_key
