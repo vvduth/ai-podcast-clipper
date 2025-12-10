@@ -41,3 +41,17 @@
 		}
 	]
 }
+
+## steps to cctreat a vertical short
+* 1 . Looping hrough tracks
+* tracks, sequence if detechtion of the same face across consecutive frames
+* each track contaain: 
+  * which frame the face appear in, 
+  * the position  (x,y) size (s) and 
+  * and other porperties of the face in each frame
+  * score indicatiing how liekly it ism that this face is speacking in each frame
+* wehn looping over tracks : avg the sspeackerscore over a window of 30 frames for smoothes
+- by avg the score, you get the more stabe, less jittery score for each frame
+
+* 2: wrote a new video:
+* * create a new cv2 video writer . a viode consist of frames so we will create a new video by looping through frames, and cropping the shit out of each frame the face most likely speaking in that frame.

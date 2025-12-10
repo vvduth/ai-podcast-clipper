@@ -8,6 +8,7 @@ import time
 import uuid
 import boto3
 import cv2
+import numpy
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import ffmpegcv
@@ -46,10 +47,73 @@ volume = modal.Volume.from_name(
 )
 
 # Mount path for torch cache
-# torch cache is for storing pre-trained models and datasets
+#  is for storing pre-trained models and datasets
 mount_path = "/root/.cache/torch"
 
 auth_scheme = HTTPBearer()
+
+def create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path, output_path, framerates = 25):
+    target_width = 1080
+    target_height = 1920
+
+    # select all diff frames
+    flist = glob.glob(os.path.join(pyframes_path, "*.jpg"))
+    flist.sort()
+
+    # initialize list to hold cropped face images
+    faces = [[] for _ in range(len(flist))]
+
+    for tidx, track in enumerate(tracks):
+        score_array = scores[tidx]
+        for fidx, frame in enumerate(track["track"]["frame"].toList()):
+            slice_start = max(fidx -30, 0)
+            slice_end = min(fidx +30,len(score_array))
+            score_slice = score_array[slice_start:slice_end]
+            avg_score = float(np.mean(score_slice) if len(score_slice) > 0 else 0)
+            faces[frame].append(
+                {'track': tidx, 'score': avg_score, 's': track['proc_track']["s"][fidx],
+                 'x': track['proc_track']["x"][fidx], 'y': track['proc_track']["y"][fidx]})
+    
+    temp_video_path = os.path.join(pyavi_path, "video_only.mp4")
+    vout = None
+    for fidx, frame_path in enumerate(tqdm(flist, 
+                                           total=len(flist),desc="Creating vertical video")):
+        img = cv2.imread(frame_path)
+        if img is None:
+            continue
+        current_faces = faces[fidx]
+        max_score_face = max(
+            current_faces, key=lambda face: face['score']
+            ) if current_faces else None
+        if max_score_face and max_score_face['score'] < 0:
+            max_score_face = None
+        if vout is None:
+            vout = ffmpegcv.VideoWriterNV(
+                file= temp_video_path,
+                codec = None,
+                fps = framerates,
+                resize = (target_width, target_height)
+            )
+        if max_score_face:
+            mode = "crop"
+        else:
+            mode = "resize"
+        if mode == "resize":
+            scale = target_width / img.shape[1]
+            resize_height = int(img.shape[0] * scale)
+            resize_image = cv2.resize(img, (target_width, resize_height),
+                                      interpolation=cv2.INTER_AREA)
+
+            scale_for_bg = max(target_width/ img.shape[1], target_height / img.shape[0])
+            bg_width = int(img.shape[1] * scale_for_bg)
+            bg_height = int(img.shape[0] * scale_for_bg)
+
+            blurred_background = cv2.resize(img, (bg_width, bg_height),
+                                            interpolation=cv2.INTER_AREA)
+            blurred_background = cv2.GaussianBlur(blurred_background, (121, 121), 0)
+            crop_x = (bg_width - target_width) // 2
+            crop_y = (bg_height - target_height) // 2
+        
 
 def process_clip(base_dir: str, original_video_path: str,
                  s3_key: str, start_time: float,
@@ -59,6 +123,58 @@ def process_clip(base_dir: str, original_video_path: str,
     s3_key_dir = os.path.dirname(s3_key)
     output_s3_key = f"{s3_key_dir}/{clip_name}.mp4"
     print(f"Output S3 Key: {output_s3_key}")
+    clip_dir = base_dir / clip_name
+    clip_dir.mkdir(parents=True, exist_ok=True)
+
+    # segment paths: original clip from start to end
+    clip_segment_path = clip_dir / f"{clip_name}_segment.mp4"
+
+    # vertical video path for TikTok/Instagram
+    # create pyavi directory for the accroding to the LR-ASD documentation
+    vertical_mp4_path = clip_dir / "pyavi" / "video_out_vertical.mp4"
+    subtitle_output_path = clip_dir / "pyavi" / "video_with_subtitles.mp4"
+
+    (clip_dir /"pywork").mkdir(parents=True, exist_ok=True)
+    pyframes_path = clip_dir / "pyframes"
+    pyavi_path = clip_dir / "pyavi"
+    audio_path = clip_dir / "pyavi" / "audio.wav"
+
+    pyframes_path.mkdir(exist_ok=True)
+    pyavi_path.mkdir(exist_ok=True)
+
+    duration = end_time - start_time
+    cut_command = (f"ffmpeg -i {original_video_path} -ss {start_time} -t {duration} "
+                   f"{clip_segment_path}")
+    subprocess.run(cut_command, shell=True, check=True,
+                   capture_output=True, text=True)
+    subprocess.run(cut_command, shell=True, check=True, capture_output=True, text=True)
+
+    # extract audio for pyavi
+    extract_audio_cmd = f"ffmpeg -i {clip_segment_path} -vn -acodec pcm_s16le -ar 16000 -ac 1 {audio_path}"
+    subprocess.run(extract_audio_cmd, shell=True, check=True, capture_output=True, text=True)
+
+    shutil.copy(clip_segment_path, base_dir/ f"{clip_name}.mp4")
+    columbia_command = (f"python Columbia_test.py --videoName {clip_name} "
+                        f"--videoFolder {str(base_dir)} "
+                        f"--pretrainModel weight/finetuning_TalkSet.model")
+    columbia_start_time = time.time()
+    subprocess.run(columbia_command, cwd="/asd", shell=True)
+    columbia_end_time = time.time()
+    print(f"Columbia model processing time: {columbia_end_time - columbia_start_time:.2f} seconds")
+
+    tracks_path = clip_dir / "pywork" / "tracks.pckl"
+    scores_path = clip_dir / "pywork" / "scores.pckl"
+    if not tracks_path.exists() or not scores_path.exists():
+        raise FileNotFoundError("Tracks or scores not found for clip")
+    with open(tracks_path, "rb") as f:
+        tracks = pickle.load(f)
+    with open(scores_path, "rb") as f:
+        scores = pickle.load(f)
+
+    cvv_start_time = time.time()
+    create_vertical_video(tracks,scores, pyframes_path, pyavi_path, audio_path, vertical_mp4_path)
+    cvv_end_time = time.time()
+    print(f"Vertical video creation time: {cvv_end_time - cvv_start_time:.2f} seconds")
 
 # Define the Modal class with GPU and FastAPI endpoint
 @app.cls(gpu="H100", timeout=900, retries=0, scaledown_window=20,
