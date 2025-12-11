@@ -16,29 +16,57 @@ import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Label } from "./ui/label";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { signupSchema } from "~/schemas/auth";
+import { signUp } from "~/actions/auth";
+import { signIn } from "~/server/auth";
 
-const signUpSchema = z.object({
-  email: z.string().min(1, "Email is required").email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-});
-
-type SignUpFormValues = z.infer<typeof signUpSchema>;
+export type SignUpFormValues = z.infer<typeof signupSchema>;
 
 export function SignupForm({
   className,
   ...props
 }: React.ComponentPropsWithoutRef<"div">) {
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const router = useRouter();
 
-    const [error, setError] = useState<string | null>(null)
-    const [isSubmitting, setIsSubmitting] = useState(false)
-  
   const {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<SignUpFormValues>({ resolver: zodResolver(signUpSchema) });
+  } = useForm<SignUpFormValues>({ resolver: zodResolver(signupSchema) });
 
-  const onSubmit = async (data: SignUpFormValues) => {};
+  const onSubmit = async (data: SignUpFormValues) => {
+    try {
+      setIsSubmitting(true);
+      setError(null);
+
+      const result = await signUp(data);
+      if (!result.success) {
+        setError(result.error ?? "An error occured during signup");
+        return;
+      }
+
+      const signUpResult = await signIn("credentials", {
+        email: data.email,
+        password: data.password,
+        redirect: false,
+      });
+
+      if (signUpResult?.error) {
+        setError(
+          "Account created but couldn't sign in automatically. Please try again.",
+        );
+      } else {
+        router.push("/dashboard");
+      }
+    } catch (error) {
+      setError("An unexpected error occured");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
