@@ -1,6 +1,5 @@
 "use server"
 import { redirect } from 'next/navigation';
-import React from 'react'
 import { SignupForm } from '~/components/signup-form';
 import { auth } from '~/server/auth'
 

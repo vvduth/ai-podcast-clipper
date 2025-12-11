@@ -1,6 +1,6 @@
 "use client";
+
 import { cn } from "~/lib/utils";
-import { Button } from "./ui/button";
 import {
   Card,
   CardContent,
@@ -8,22 +8,25 @@ import {
   CardHeader,
   CardTitle,
 } from "./ui/card";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "./ui/field";
 import { Input } from "./ui/input";
-import z from "zod";
-import { useForm } from "react-hook-form";
-import { useState } from "react";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { Label } from "./ui/label";
+import { Button } from "./ui/button";
+import { z } from "zod";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { signupSchema } from "~/schemas/auth";
+import {
+  loginSchema,
+  signupSchema,
+  type LoginFormValues,
+  type SignupFormValues,
+} from "~/schemas/auth";
 import { signUp } from "~/actions/auth";
 import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
-export type SignUpFormValues = z.infer<typeof signupSchema>;
-
-export function SignupForm({
+export function LoginForm({
   className,
   ...props
 }: React.ComponentPropsWithoutRef<"div">) {
@@ -35,29 +38,21 @@ export function SignupForm({
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<SignUpFormValues>({ resolver: zodResolver(signupSchema) });
+  } = useForm<LoginFormValues>({ resolver: zodResolver(loginSchema) });
 
-  const onSubmit = async (data: SignUpFormValues) => {
+  const onSubmit = async (data: LoginFormValues) => {
     try {
       setIsSubmitting(true);
       setError(null);
 
-      const result = await signUp(data);
-      if (!result.success) {
-        setError(result.error ?? "An error occured during signup");
-        return;
-      }
-
-      const signUpResult = await signIn("credentials", {
+      const signInResult = await signIn("credentials", {
         email: data.email,
         password: data.password,
         redirect: false,
       });
 
-      if (signUpResult?.error) {
-        setError(
-          "Account created but couldn't sign in automatically. Please try again.",
-        );
+      if (signInResult?.error) {
+        setError("Invalid email or password.");
       } else {
         router.push("/dashboard");
       }
@@ -67,13 +62,14 @@ export function SignupForm({
       setIsSubmitting(false);
     }
   };
+
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">Sign up</CardTitle>
+          <CardTitle className="text-2xl">Login</CardTitle>
           <CardDescription>
-            Enter your email below to sign up to your account
+            Enter your email below to log in to your account
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -88,7 +84,6 @@ export function SignupForm({
                   required
                   {...register("email")}
                 />
-
                 {errors.email && (
                   <p className="text-sm text-red-500">{errors.email.message}</p>
                 )}
@@ -117,13 +112,13 @@ export function SignupForm({
               )}
 
               <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? "Signing up..." : "Sign up"}
+                {isSubmitting ? "Logging in..." : "Log in"}
               </Button>
             </div>
             <div className="mt-4 text-center text-sm">
-              Already have an account?{" "}
-              <Link href="/login" className="underline underline-offset-4">
-                Sign in
+              Don&apos;t have an account?{" "}
+              <Link href="/signup" className="underline underline-offset-4">
+                Sign up
               </Link>
             </div>
           </form>
