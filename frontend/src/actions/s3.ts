@@ -43,7 +43,7 @@ export async function generateUploadUrl(fileInfo: {
     data: {
       userId: session.user.id,
       s3Key: key,
-      filename: fileInfo.filename,
+      displayName: fileInfo.filename,
       uploaded: false,
     },
     select: {

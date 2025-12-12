@@ -13,10 +13,21 @@ import {
   CardHeader,
   CardTitle,
 } from "./ui/card";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table"
 import { Loader2, UploadCloud } from "lucide-react";
 import { generateUploadUrl } from "~/actions/s3";
-import { set } from "zod";
 import { toast } from "sonner";
+import { processVideo } from "~/actions/generation";
+import { Badge } from "./ui/badge";
+import { useRouter } from "next/navigation";
 const DashboardClient = ({
   uploadedFiles,
   clips,
@@ -33,7 +44,16 @@ const DashboardClient = ({
 }) => {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
-
+  const [refreshing, setRefreshing] = useState(false)
+  const router = useRouter();
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    router.refresh();
+    setTimeout(() => {
+      setRefreshing(false);
+      router.refresh();
+    }, 600);
+  }
   const handleDrop = (acceptedFiles: File[]) => {
     setFiles(acceptedFiles);
   };
@@ -70,6 +90,8 @@ const DashboardClient = ({
       if (!uploadResponse.ok) {
         throw new Error("Failed to upload file to S3 " + uploadResponse.status);
       }
+
+      await processVideo(uploadedFileId);
       setFiles([]);
       toast.success("File uploaded successfully.", {
         description: "Processing will begin shortly. Check the status below",
@@ -166,8 +188,90 @@ const DashboardClient = ({
                   )}
                 </Button>
               </div>
+              {uploadedFiles.length > 0 && (
+                <div className="pt-6">
+                  <div className="flex mb-2 items-center justify-between">
+                    <h3 className="text-md mb-2 font-medium">Queue status</h3>
+                    <Button variant={"outline"} 
+                    size={"sm"}
+                    onClick={handleRefresh} disabled={refreshing}>
+                      {refreshing ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                         
+                        </>
+                      ) : (
+                        "Refresh"
+                      )}
+                    </Button>
+                  </div>
+                  
+                  <div className="max-h-[300px] overflow-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>File</TableHead>
+                        <TableHead>Uploaded</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Clips created</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {uploadedFiles.map((file) => (
+                          <TableRow key={file.id}>
+                            <TableCell className="max-w-xs truncate font-medium">{file.filename}</TableCell>
+                            <TableCell>{file.createdAt.toLocaleDateString()}</TableCell>
+                            <TableCell>
+                               {file.status === "queued" && (
+                                <Badge variant="outline">Queued</Badge>
+                              )}
+                              {file.status === "processing" && (
+                                <Badge variant="outline">Processing</Badge>
+                              )}
+                              {file.status === "processed" && (
+                                <Badge variant="outline">Processed</Badge>
+                              )}
+                              {file.status === "no credits" && (
+                                <Badge variant="destructive">No credits</Badge>
+                              )}
+                              {file.status === "failed" && (
+                                <Badge variant="destructive">Failed</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                                  {file.clipsCount > 0 ? (
+                                <span>
+                                  {file.clipsCount} clip
+                                  {file.clipsCount !== 1 ? "s" : ""}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  No clips yet
+                                </span>
+                              )}
+                            </TableCell>
+                        </TableRow>
+                        ))}
+                        </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
+        </TabsContent>
+        <TabsContent value="my-clips">
+          <Card>
+            <CardHeader>
+              <CardTitle>Your Clips</CardTitle>
+               <CardDescription>
+              View and manage the AI-generated clips from your uploaded.
+              Procesing may take a few minutes depending on the length of your
+              podcast.
+            </CardDescription>
+            </CardHeader>
+           <CardContent></CardContent>
+            </Card>
         </TabsContent>
       </Tabs>
     </div>
