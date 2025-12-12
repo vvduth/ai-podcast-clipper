@@ -182,11 +182,16 @@ def create_subtitles_with_ffmpeg(transcript_segments: list, clip_start: float, c
         if end_rel <= 0:
             continue
 
+        # Check for long silence to force new line
+        is_long_gap = False
+        if current_end is not None and (start_rel - current_end) > 1.0:
+            is_long_gap = True
+
         if not current_words:
             current_start = start_rel
             current_end = end_rel
             current_words = [word]
-        elif len(current_words) >= max_words:
+        elif len(current_words) >= max_words or is_long_gap:
             subtitles.append(
                 (current_start, current_end, ' '.join(current_words)))
             current_words = [word]
@@ -199,6 +204,23 @@ def create_subtitles_with_ffmpeg(transcript_segments: list, clip_start: float, c
     if current_words:
         subtitles.append(
             (current_start, current_end, ' '.join(current_words)))
+
+    # Post-processing for better sync
+    processed_subtitles = []
+    for i, (start, end, text) in enumerate(subtitles):
+        # 1. Minimum duration (e.g. 0.5s)
+        if end - start < 0.5:
+            end = start + 0.5
+        
+        # 2. Gap filling (prevent flickering)
+        if i < len(subtitles) - 1:
+            next_start = subtitles[i+1][0]
+            if 0 < next_start - end < 0.2:
+                end = next_start
+        
+        processed_subtitles.append((start, end, text))
+    
+    subtitles = processed_subtitles
 
     subs = pysubs2.SSAFile()
 
@@ -216,10 +238,10 @@ def create_subtitles_with_ffmpeg(transcript_segments: list, clip_start: float, c
     new_style.outline = 2.0
     new_style.shadow = 2.0
     new_style.shadowcolor = pysubs2.Color(0, 0, 0, 128)
-    new_style.alignment = 2
+    new_style.alignment = 5  # Center alignment (5 = middle-center)
     new_style.marginl = 50
     new_style.marginr = 50
-    new_style.marginv = 50
+    new_style.marginv = 0  # No vertical margin for center positioning
     new_style.spacing = 0.0
 
     subs.styles[style_name] = new_style
