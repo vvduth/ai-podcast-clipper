@@ -161,7 +161,7 @@ const DashboardClient = ({
                   </>
                 )}
               </Dropzone>
-              <div className="flex items-start justify-between">
+              <div className="mt-2 flex items-start justify-between">
                 <div>
                   {files.length > 0 && (
                     <div className="space-y-1 text-sm">
