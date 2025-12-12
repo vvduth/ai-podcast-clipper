@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { processVideo } from "~/actions/generation";
 import { Badge } from "./ui/badge";
 import { useRouter } from "next/navigation";
+import ClipDisplay from "./clip-display";
 const DashboardClient = ({
   uploadedFiles,
   clips,
@@ -270,7 +271,9 @@ const DashboardClient = ({
               podcast.
             </CardDescription>
             </CardHeader>
-           <CardContent></CardContent>
+           <CardContent>
+            <ClipDisplay clips={clips} />
+           </CardContent>
             </Card>
         </TabsContent>
       </Tabs>
