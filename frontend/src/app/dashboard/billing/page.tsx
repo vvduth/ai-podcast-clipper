@@ -1,8 +1,9 @@
+"use client";
 import type { VariantProps } from "class-variance-authority";
 import { ArrowLeftIcon, CheckIcon } from "lucide-react";
 import Link from "next/link";
 import React from "react";
-import type { PriceId } from "~/actions/stripe";
+import { createCheckoutSession, type PriceId } from "~/actions/stripe";
 import { Button, buttonVariants } from "~/components/ui/button";
 import {
   Card,
@@ -48,10 +49,10 @@ const plans: PricingPlan[] = [
   },
   {
     title: "Large Pack",
-    price: "60€",
+    price: "64€",
     description: "Best value for frequent podcast studio and agencies.",
-    features: ["500 Credits", "No expiration", "Download all clips"],
-    buttonText: "Buy 300 credits",
+    features: ["450 Credits", "No expiration", "Download all clips"],
+    buttonText: "Buy 450 credits",
     savePercentage: "Save 16%",
     buttonVariant: "outline",
     priceId: "large",
@@ -94,7 +95,7 @@ function PricingCard({ plan }: { plan: PricingPlan }) {
         </ul>
       </CardContent>
       <CardFooter>
-        <form className="w-full">
+        <form action={() => createCheckoutSession(plan.priceId)} className="w-full">
           <Button variant={plan.buttonVariant} className="w-full" type="submit">
             {plan.buttonText}
           </Button>

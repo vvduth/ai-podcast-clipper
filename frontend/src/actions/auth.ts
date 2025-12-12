@@ -5,6 +5,7 @@ import { hashPassword } from "~/lib/auth";
 import { signupSchema } from "~/schemas/auth";
 import { db } from "~/server/db";
 import Stripe from "stripe"
+import { env } from "~/env";
 type SignUpResult = {
     success: boolean;
     error?: string;
@@ -34,16 +35,16 @@ export async function signUp(formData: SignUpFormValues) : Promise<SignUpResult>
         const hashedPassword = await hashPassword(password);
 
         // sign user up in stripe too
-        // const stripe = new Stripe("TODO: holerkey")
-        // const stripCustomer = await stripe.customers.create({
-        //     email: email.toLowerCase(),
-        // })
+        const stripe = new Stripe(env.STRIPE_SECRET_KEY)
+        const stripeCustomer = await stripe.customers.create({
+            email: email.toLowerCase(),
+        })
 
         await db.user.create({
             data: {
                 email,
                 password: hashedPassword,
-                //stripeCustomerId: stripCustomer.id,
+                stripeCustomerId: stripeCustomer.id,
             }
         });
 
