@@ -16,6 +16,7 @@ export const env = createEnv({
       .enum(["development", "test", "production"])
       .default("development"),
     PROCESS_VIDEO_ENDPOINT: z.string().url(),
+    PROCESS_SITCOM_VIDEO_ENDPOINT: z.string().url(),
     PROCESS_VIDEO_ENDPOINT_AUTH: z.string(),
     S3_BUCKET_NAME: z.string(),
     AWS_REGION: z.string(),
@@ -49,6 +50,7 @@ export const env = createEnv({
     NODE_ENV: process.env.NODE_ENV,
     PROCESS_VIDEO_ENDPOINT: process.env.PROCESS_VIDEO_ENDPOINT,
     PROCESS_VIDEO_ENDPOINT_AUTH: process.env.PROCESS_VIDEO_ENDPOINT_AUTH,
+    PROCESS_SITCOM_VIDEO_ENDPOINT: process.env.PROCESS_SITCOM_VIDEO_ENDPOINT,
     S3_BUCKET_NAME: process.env.S3_BUCKET_NAME,
     AWS_REGION: process.env.AWS_REGION,
     AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,

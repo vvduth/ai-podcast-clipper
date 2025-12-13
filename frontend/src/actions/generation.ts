@@ -40,6 +40,39 @@ export async function processVideo(uploadedFileId: string) {
   revalidatePath("/dashboard");
 }
 
+export async function processSitcom(uploadedFileId:string) {
+  const uploadVideo = await db.uploadedFile.findUniqueOrThrow({
+    where: { id: uploadedFileId },
+    select: {
+      uploaded: true,
+      id: true,
+      userId: true,
+    },
+  });
+
+  if (uploadVideo.uploaded) {
+    return;
+  }
+
+  await inngest.send({
+    name: "process-video-events",
+    data: {
+      uploadedFileId: uploadVideo.id,
+      userId: uploadVideo.userId,
+      type: "sitcom",
+    },
+  });
+
+  await db.uploadedFile.update({
+    where: { id: uploadVideo.id },
+    data: {
+      uploaded: true,
+    },
+  });
+
+  revalidatePath("/dashboard");
+}
+
 export async function getClipPlayUrl(clipId: string): Promise<{
   sucess: boolean;
   url?: string;

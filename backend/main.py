@@ -421,6 +421,44 @@ class AiPodcastClipper:
     The transcript is as follows:\n\n""" + str(transcript))
         print(f"Identified moments response: ${response.text}")
         return response.text
+
+    def identify_moments_from_sitcoms(self, transcript: dict):
+        response = self.gemini_client.models.generate_content(
+            model="gemini-2.5-flash-preview-09-2025", 
+            contents="""
+    This is a comedy sitcom episode transcript (e.g., The Big Bang Theory, Friends) consisting of words with their start and end timestamps. The full episode is approximately 18-20 minutes long. I am looking to create viral short clips between a minimum of 30 and maximum of 120 seconds long. The clip should never exceed 120 seconds.
+
+    Your task is to find and extract the most memorable, funny, and shareable key moments from the episode.
+    Each clip should capture a complete comedic moment - a joke with its setup and punchline, a memorable one-liner, an iconic scene, or a character's standout moment.
+
+    Focus on:
+    - Complete jokes (setup + punchline)
+    - Witty one-liners or catchphrases
+    - Funny character interactions or reactions
+    - Iconic or quotable moments
+    - Running gags or callbacks
+    - Laugh-out-loud scenes that can stand alone
+
+    Please adhere to the following rules:
+    - Ensure that clips do not overlap with one another.
+    - Start and end timestamps of the clips should align perfectly with natural scene/joke boundaries in the transcript.
+    - Only use the start and end timestamps provided in the input. Modifying timestamps is not allowed.
+    - Format the output as a list of JSON objects, each representing a clip with 'start' and 'end' timestamps: [{"start": seconds, "end": seconds}, ...clip2, clip3]. The output should always be readable by the python json.loads function.
+    - Aim to generate clips between 40-90 seconds when possible, ensuring each clip captures a complete comedic moment.
+    - Extract 3-5 of the best moments from the episode.
+
+    Avoid including:
+    - Opening or closing credits
+    - Incomplete jokes (setup without punchline or vice versa)
+    - Transitional scenes without comedic value
+    - Moments that require too much context from earlier in the episode
+
+    If there are no valid clips to extract, the output should be an empty list [], in JSON format. Also readable by json.loads() in Python.
+
+    The transcript is as follows:\n\n""" + str(transcript))
+        print(f"Identified sitcom moments response: ${response.text}")
+        return response.text
+    
     @modal.fastapi_endpoint(method="GET")
     # place holder GET endpoint for health check
     def health_check(self):
@@ -470,6 +508,52 @@ class AiPodcastClipper:
             print("Cleaning up temporary files " + str(base_dir))
             shutil.rmtree(base_dir,ignore_errors=True)
 
+    @modal.fastapi_endpoint(method="POST")
+    def process_sitcom(self, request: ProcessVideoRequest, token: HTTPAuthorizationCredentials = Depends(auth_scheme)):
+        s3_key = request.s3_key
+        if token.credentials != os.environ["AUTH_TOKEN"]:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token",
+                                headers={"WWW-Authenticate": "Bearer"})
+        run_id = str(uuid.uuid4())
+        base_dir = pathlib.Path("/tmp") / run_id
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        # download video file
+        video_path = base_dir / "input.mp4"
+        s3_client = boto3.client("s3")
+        s3_client.download_file("ai-podcast-clipper-dukem", s3_key, str(video_path))
+
+        # 1. Transcribe video
+        transcript_segments_json = self.transcribe_video(base_dir, video_path)
+        transcript_segments = json.loads(transcript_segments_json)
+
+        # 2. identify key sitcom moments using GenAI
+        print("Identifying key sitcom moments using GenAI...")
+        identified_moments_raw = self.identify_moments_from_sitcoms(transcript_segments)
+
+        cleaned_json_string = identified_moments_raw.strip()
+        if cleaned_json_string.startswith("```json"):
+            cleaned_json_string = cleaned_json_string[len("```json"):].strip()
+        if cleaned_json_string.endswith("```"):
+            cleaned_json_string = cleaned_json_string[:-len("```"):].strip()
+
+        clip_moments = json.loads(cleaned_json_string)
+        if not clip_moments or not isinstance(clip_moments, list):
+            raise ValueError("Invalid response format from GenAI. Expected a list of clip moments.")
+            clip_moments = []
+        print(clip_moments)
+
+        # 3. loop through clip moments and extract clips (process all clips for sitcoms)
+        for index, moment in enumerate(clip_moments):
+            if "start" in moment and "end" in moment:
+                print("processing sitcom moment:" + str(index) + " start:" + str(moment["start"]) + " end:" + str(moment["end"]))
+                process_clip(base_dir, video_path, s3_key, moment["start"], moment["end"], index, transcript_segments)
+        
+        if base_dir.exists():
+            print("Cleaning up temporary files " + str(base_dir))
+            shutil.rmtree(base_dir, ignore_errors=True)
+        
+        return {"status": "success", "clips_processed": len(clip_moments)}
 
 # define a local entrypoint for testing
 @app.local_entrypoint()

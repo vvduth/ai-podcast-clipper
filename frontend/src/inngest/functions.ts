@@ -14,9 +14,10 @@ export const processVideo = inngest.createFunction(
   },
   { event: "process-video-events" },
   async ({ event, step }) => {
-    const { uploadedFileId } = event.data as {
+    const { uploadedFileId, type } = event.data as {
       uploadedFileId: string;
       userId: string;
+      type?: string;
     };
 
     try {
@@ -58,7 +59,8 @@ export const processVideo = inngest.createFunction(
           });
         });
 
-        await step.fetch(env.PROCESS_VIDEO_ENDPOINT, {
+        if (type === "sitcom") {
+            await step.fetch(env.PROCESS_SITCOM_VIDEO_ENDPOINT, {
           method: "POST",
           body: JSON.stringify({ s3_key: s3Key }),
           headers: {
@@ -66,6 +68,18 @@ export const processVideo = inngest.createFunction(
             Authorization: `Bearer ${env.PROCESS_VIDEO_ENDPOINT_AUTH}`,
           },
         });
+        } else {
+          await step.fetch(env.PROCESS_VIDEO_ENDPOINT, {
+          method: "POST",
+          body: JSON.stringify({ s3_key: s3Key }),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${env.PROCESS_VIDEO_ENDPOINT_AUTH}`,
+          },
+        });
+        }
+
+
 
         const { clipsFound } = await step.run(
           "create-clips-in-db",
