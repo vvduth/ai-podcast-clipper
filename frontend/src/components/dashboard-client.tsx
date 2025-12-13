@@ -276,10 +276,10 @@ const DashboardClient = ({
                                 <Badge variant="outline">Queued</Badge>
                               )}
                               {file.status === "processing" && (
-                                <Badge variant="outline">Processing</Badge>
+                                <Badge variant="secondary">Processing</Badge>
                               )}
                               {file.status === "processed" && (
-                                <Badge variant="outline">Processed</Badge>
+                                <Badge variant="default">Processed</Badge>
                               )}
                               {file.status === "no credits" && (
                                 <Badge variant="destructive">No credits</Badge>
